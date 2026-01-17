@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+downloads/
+final_videos/
+input_subs/
+translated_subs/
+*.mp4
+*.mkv
+*.webm
+
+# Environment
+.env
+set_env.sh
+
+# Logs
+*.log
+
+# Whisper models cache
+~/.cache/whisper/
