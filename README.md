@@ -12,18 +12,35 @@
 
 - 🎬 **YouTube 영상 다운로드** - yt-dlp를 사용한 고품질 영상 다운로드
 - 📝 **자막 추출** - 기존 자막 다운로드 또는 Whisper STT로 음성 인식
-- 🌏 **자막 번역** - AI 기반 한국어 번역 (반자동 워크플로)
+- 🌏 **자막 번역** - **반자동 워크플로** (AI 도구에 직접 요청)
 - 🎥 **자막 삽입** - 소프트섭/하드섭 선택 가능
 
 ---
 
-## 🚀 빠른 시작
+## � 워크플로 설명
+
+이 프로젝트는 **반자동(Semi-Automatic) 워크플로**를 사용합니다.
+
+| 단계 | 방식 | 설명 |
+|------|------|------|
+| 1. 영상 다운로드 | 🤖 자동 | yt-dlp로 자동 다운로드 |
+| 2. 자막 추출 | 🤖 자동 | 기존 자막 또는 Whisper STT |
+| 3. **자막 번역** | 👤 **수동** | 사용자가 AI 도구에 직접 요청 |
+| 4. 영상 생성 | 🤖 자동 | ffmpeg로 자막 삽입 |
+
+> **왜 번역이 수동인가요?**  
+> Gemini API 무료 티어의 출력 토큰 한도로 인해 긴 자막이 번역 중 절단되는 문제가 있었습니다.  
+> 사용자가 AI 도구(ChatGPT, Claude, Gemini 등)에 직접 요청하면 더 정확한 번역 결과를 얻을 수 있습니다.
+
+---
+
+## �🚀 빠른 시작
 
 ### 1. 요구사항
 
 - Python 3.10 이상
 - ffmpeg (시스템 설치 필요)
-- GOOGLE_API_KEY (Gemini API)
+- **API 키 불필요** (반자동 모드)
 
 ### 2. ffmpeg 설치
 
@@ -59,25 +76,10 @@ source venv/bin/activate
 venv\Scripts\activate.bat
 
 # 의존성 설치
-pip install yt-dlp openai-whisper PyQt6 google-generativeai
+pip install yt-dlp openai-whisper PyQt6
 ```
 
-### 4. API 키 설정
-
-```bash
-# Linux/Mac
-export GOOGLE_API_KEY="your-api-key"
-
-# Windows (PowerShell)
-$env:GOOGLE_API_KEY="your-api-key"
-
-# Windows (CMD)
-set GOOGLE_API_KEY=your-api-key
-```
-
-> ⚠️ **보안 주의**: API 키를 파일에 저장할 경우 `.gitignore`에 추가하세요!
-
-### 5. 실행
+### 4. 실행
 
 ```bash
 # Linux/Mac - GUI 실행
@@ -89,20 +91,40 @@ python scripts/gui_app.py
 
 ---
 
-## 📖 사용 방법
+## 📖 사용 방법 (GUI)
 
-### 반자동 워크플로 (GUI 권장)
+### Step 1: 시작
+1. GUI 실행 후 **YouTube URL** 입력
+2. **시작 버튼** 클릭
+3. 영상 다운로드 + 자막 추출 자동 진행
 
-이 프로젝트는 **반자동 워크플로**를 사용합니다. 번역 단계에서 AI(Gemini API 토큰 제한)보다 정확한 결과를 위해 사용자가 직접 AI에게 번역을 요청합니다.
+### Step 2: 번역 (수동)
+추출 완료 후 화면에 안내 메시지가 표시됩니다:
 
-1. **시작 버튼** 클릭 → YouTube URL 입력
-2. 영상 다운로드 + 자막 추출 자동 진행
-3. 화면에 표시된 안내에 따라 **AI 도구에게 번역 요청**
-   - `input_subs/VIDEO_ID.srt` → `translated_subs/VIDEO_ID.srt`
-4. 번역 완료 후 **번역완료 버튼** 클릭
-5. 최종 영상 생성 완료! (`final_videos/VIDEO_ID_translated.mp4`)
+```
+📁 원본 자막 파일: input_subs/VIDEO_ID.srt
 
-### CLI 개별 실행
+📝 AI 도구에게 다음과 같이 요청하세요:
+"input_subs/VIDEO_ID.srt 파일을 한국어로 번역해서 
+translated_subs/VIDEO_ID.srt 파일로 저장해주세요.
+SRT 형식을 유지하고, 타임코드는 절대 수정하지 마세요."
+```
+
+**사용 가능한 AI 도구:**
+- Antigravity (현재 사용 중)
+- ChatGPT
+- Claude
+- Gemini Web
+- 기타 AI 어시스턴트
+
+### Step 3: 완료
+1. 번역이 완료되면 **번역완료 버튼** 클릭
+2. 최종 영상 자동 생성
+3. 결과: `final_videos/VIDEO_ID_translated.mp4`
+
+---
+
+## 💻 CLI 사용법
 
 ```bash
 # 1. 영상 다운로드
@@ -111,9 +133,9 @@ python scripts/download.py "https://youtube.com/watch?v=VIDEO_ID"
 # 2. 자막 추출 (기존 자막 또는 Whisper STT)
 python scripts/extract_subs.py VIDEO_ID
 
-# 3. 자막 번역 (Gemini API 사용)
-python scripts/translate.py VIDEO_ID
-# 또는 수동으로 파일 편집: input_subs/VIDEO_ID.srt → translated_subs/VIDEO_ID.srt
+# 3. 자막 번역 (수동)
+# AI 도구에 요청하여 번역:
+# input_subs/VIDEO_ID.srt → translated_subs/VIDEO_ID.srt
 
 # 4. 최종 영상 생성
 python scripts/embed_subs.py VIDEO_ID        # 소프트섭 (기본)
@@ -129,7 +151,7 @@ youtube-subtitle-translator/
 ├── scripts/
 │   ├── download.py      # 영상 다운로드 (yt-dlp)
 │   ├── extract_subs.py  # 자막 추출/STT (Whisper)
-│   ├── translate.py     # 자막 번역 (Gemini API) - 토큰 제한으로 긴 자막은 수동 권장
+│   ├── translate.py     # [미사용] 자막 번역 (Gemini API)
 │   ├── embed_subs.py    # 자막 삽입 (ffmpeg)
 │   └── gui_app.py       # PyQt6 GUI 애플리케이션
 ├── downloads/           # 다운로드된 원본 영상
@@ -138,19 +160,14 @@ youtube-subtitle-translator/
 ├── final_videos/        # 최종 출력 영상 (.mp4)
 ├── rules.md             # 번역 가이드라인
 ├── CHANGELOG.md         # 변경 이력
-├── run_gui.sh           # GUI 실행 스크립트 (Linux/Mac)
-└── set_env.sh           # 환경 변수 설정 (예시, .gitignore 권장)
+└── run_gui.sh           # GUI 실행 스크립트 (Linux/Mac)
 ```
+
+> **참고**: `translate.py`는 Gemini API 토큰 제한 문제로 현재 사용하지 않습니다. (CHANGELOG 11차 참조)
 
 ---
 
 ## ⚙️ 설정
-
-### 환경 변수
-
-| 변수명 | 설명 | 필수 |
-|--------|------|------|
-| `GOOGLE_API_KEY` | Gemini API 키 | ✅ |
 
 ### 자막 옵션
 
@@ -170,14 +187,6 @@ youtube-subtitle-translator/
 | `small` | ~2GB | ★★★☆☆ | 보통 |
 | `medium` | ~5GB | ★★★★☆ | 느림 |
 | `large` | ~10GB | ★★★★★ | 매우 느림 |
-
----
-
-## ⚠️ 보안 주의사항
-
-- **GOOGLE_API_KEY**는 절대 Git에 커밋하지 마세요
-- `set_env.sh` 파일을 사용할 경우 `.gitignore`에 추가되어 있는지 확인하세요
-- 환경 변수는 시스템 환경 설정이나 `.env` 파일(gitignore 처리)로 관리 권장
 
 ---
 
@@ -209,11 +218,8 @@ youtube-subtitle-translator/
 ffmpeg -version
 
 # 설치되지 않은 경우
-# Ubuntu/Debian
-sudo apt install ffmpeg
-
-# macOS
-brew install ffmpeg
+# Ubuntu/Debian: sudo apt install ffmpeg
+# macOS: brew install ffmpeg
 ```
 
 ### ModuleNotFoundError
@@ -222,7 +228,7 @@ brew install ffmpeg
 which python  # venv 경로가 나와야 함
 
 # 의존성 재설치
-pip install yt-dlp openai-whisper PyQt6 google-generativeai
+pip install yt-dlp openai-whisper PyQt6
 ```
 
 ---
@@ -237,7 +243,6 @@ MIT License - 자유롭게 사용, 수정, 배포 가능
 
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) - YouTube 다운로드
 - [OpenAI Whisper](https://github.com/openai/whisper) - 음성 인식
-- [Google Gemini](https://ai.google.dev/) - AI 번역
 - [PyQt6](https://www.riverbankcomputing.com/software/pyqt/) - GUI 프레임워크
 
 ---
@@ -246,11 +251,15 @@ MIT License - 자유롭게 사용, 수정, 배포 가능
 
 자세한 변경 이력은 [CHANGELOG.md](CHANGELOG.md)를 참고하세요.
 
+**주요 변경:**
+- v1.0: 자동 번역 (Gemini API)
+- v1.1: **반자동 모드 전환** - API 토큰 제한으로 인해 번역 단계를 수동으로 변경
+
 ---
 
 ## 🤖 문서 검증
 
 이 README는 다음 AI들의 크로스 검증을 거쳤습니다:
-- **Codex** (OpenAI) - 구조 및 정확성 검토
-- **Claude Code** (Anthropic) - 상세 내용 검토
-- **Antigravity** (Google) - 최종 통합 및 작성
+- **Codex** (OpenAI)
+- **Claude Code** (Anthropic)
+- **Antigravity** (Google)
