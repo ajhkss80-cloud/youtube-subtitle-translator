@@ -8,6 +8,20 @@
 
 ---
 
+## ⚠️ DISCLAIMER / 주의사항
+
+**ENGLISH:**
+> This project is intended for **educational and development testing purposes only**, not for distribution.  
+> Due to copyright considerations, users are solely responsible for downloading and using this software.  
+> The author assumes no liability for any misuse or legal issues arising from its use.
+
+**한국어:**
+> 본 프로젝트는 **코드 학습 및 개발 테스트 목적**으로만 제작되었으며, 배포용이 아닙니다.  
+> 저작권 관계로 인해 다운로드 및 사용에 관한 모든 책임은 사용자에게 있습니다.  
+> 저자는 오용이나 법적 문제에 대해 어떠한 책임도 지지 않습니다.
+
+---
+
 ## ✨ 주요 기능
 
 - 🎬 **YouTube 영상 다운로드** - yt-dlp를 사용한 고품질 영상 다운로드
@@ -252,8 +266,14 @@ MIT License - 자유롭게 사용, 수정, 배포 가능
 자세한 변경 이력은 [CHANGELOG.md](CHANGELOG.md)를 참고하세요.
 
 **주요 변경:**
-- v1.0: 자동 번역 (Gemini API)
+- **v2.0 (2026-01-17)**: Clean Architecture 리팩토링
+  - Domain-Driven Design 적용 (Entities, Value Objects)
+  - Application Layer (Use Cases, Ports)
+  - Infrastructure Layer (Adapters: YtDlp, Whisper, FFmpeg)
+  - 테스트 가능성 향상 (Mock 기반 통합 테스트)
+  - 코드 품질 개선 (Rule of Three 검증 프로세스)
 - v1.1: **반자동 모드 전환** - API 토큰 제한으로 인해 번역 단계를 수동으로 변경
+- v1.0: 자동 번역 (Gemini API)
 
 ---
 
