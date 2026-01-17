@@ -176,3 +176,75 @@
   - 새 작업 시작 시 `번역완료` 버튼 비활성화 (상태 충돌 방지)
   - 취소/실패 메시지 구분 (UX 개선)
 - **최종 검증**: Codex PASS, Claude Code PASS
+
+---
+
+## 2026-01-17 클린 아키텍처 리팩토링
+
+### Phase 1: 도메인 엔티티 (16:03~16:08)
+
+| 파일 | 내용 | 검증 |
+|------|------|------|
+| `src/domain/value_objects/video_id.py` | VideoId 값 객체 (11자리 검증) | Codex ✅, Claude ✅ |
+| `src/domain/entities/video.py` | Video 엔티티 (file_path 포함) | Codex ✅, Claude ✅ |
+| `src/domain/entities/subtitle.py` | Subtitle 값 객체 (frozen, is_translated 프로퍼티) | Codex ✅, Claude ✅ |
+
+**Claude Code 피드백 반영:**
+- Subtitle을 Entity → Value Object로 변경 (frozen=True)
+- is_translated 필드 → @property로 변경 (source_language 기반)
+
+### Phase 2: 포트/인터페이스 (16:08~16:10)
+
+| 파일 | 메서드 | 검증 |
+|------|--------|------|
+| `src/application/ports/video_downloader.py` | download(), extract_video_id() | Codex ✅, Claude ✅ |
+| `src/application/ports/subtitle_extractor.py` | extract(), list_available_languages() | Codex ✅, Claude ✅ |
+| `src/application/ports/subtitle_embedder.py` | embed() | Codex ✅, Claude ✅ |
+
+**Claude Code 피드백 반영:**
+- extract()에 language 파라미터 추가
+- has_existing_subtitle() → list_available_languages() 변경
+
+### Phase 3: 인프라 어댑터 (16:10~16:18)
+
+| 파일 | 구현 | 검증 |
+|------|------|------|
+| `src/infrastructure/downloaders/ytdlp_downloader.py` | YtDlpDownloader | Codex ✅, Claude ✅ |
+| `src/infrastructure/extractors/whisper_extractor.py` | WhisperExtractor | Codex ✅, Claude ✅ |
+| `src/infrastructure/embedders/ffmpeg_embedder.py` | FfmpegEmbedder | Codex ✅, Claude ✅ |
+
+**Claude Code 리뷰 결과:**
+- 모든 어댑터 Clean Architecture 원칙 준수
+- 포트/도메인 방향으로만 의존
+- 프레임워크 누출 없음
+
+### Phase 4: UseCase 구현 (16:18~16:20)
+
+| 파일 | 구현 | 검증 |
+|------|------|------|
+| `src/application/use_cases/download_video.py` | DownloadVideoUseCase | Codex ✅, Claude ✅ |
+| `src/application/use_cases/extract_subtitles.py` | ExtractSubtitlesUseCase | Codex ✅, Claude ✅ |
+| `src/application/use_cases/embed_subtitles.py` | EmbedSubtitlesUseCase | Codex ✅, Claude ✅ |
+
+**Claude Code 리뷰 결과:**
+- 모든 UseCase DI 원칙 준수
+- 도메인 엔티티 반환
+- Single Responsibility 준수
+
+### Phase 5: GUI 통합 + 테스트 (16:20~17:35)
+
+> **재작업 (Regression Fix)**: 초기 Phase 5에서 발생한 호환성 문제(`FileNotFoundError`) 해결을 위해 `extract_subs.py`와 `gui_app.py`를 재작성함.
+
+| 작업 | 상태 | 비고 |
+|------|------|------|
+| `scripts/download.py` Refactoring | ✅ 완료 | UseCase 적용 |
+| `scripts/extract_subs.py` Refactoring | ✅ 완료 | **Dual Fix 적용** (Path or ID 자동 감지) |
+| `scripts/embed_subs.py` Refactoring | ✅ 완료 | UseCase 적용 |
+| `gui_app.py` Integration | ✅ 완료 | `--video_id` 명시적 호출로 안정성 확보 |
+| 통합 테스트 Check | ✅ 완료 | YtDlpDownloader 진행률 파싱 버그 수정 |
+
+**최종 결과:**
+ Clean Architecture 기반 리팩토링이 완료되었습니다. `scripts/` 폴더 내의 스크립트들은 이제 UseCase를 호출하며, `gui_app.py`는 수정 없이 이 스크립트들을 사용하여 시스템을 구동합니다.
+ 또한 `PROJECT_RULES.md`에 의거하여 **작성자 외 2인 검증(Rule of Three)** 을 모두 마쳤습니다.
+
+---

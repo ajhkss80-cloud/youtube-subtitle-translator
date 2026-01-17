@@ -1,119 +1,86 @@
 #!/usr/bin/env python3
 """
-YouTube 번역 워크플로 GUI 애플리케이션 (PyQt6)
-반자동화 버전: 다운로드/자막추출 → 수동 번역 요청 → 영상 생성
+GUI Application for YouTube Subtitle Translator
 """
-
 import sys
-import os
-import subprocess
 import re
 from pathlib import Path
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLabel, QLineEdit, QPushButton, 
-                             QTextEdit, QMessageBox, QCheckBox)
-from PyQt6.QtCore import QThread, pyqtSignal, Qt
 
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QTextEdit, QMessageBox, QCheckBox
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+
+# 프로젝트 루트 경로 추가 (모듈 import 위해)
 PROJECT_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = PROJECT_ROOT / "scripts"
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# 경로 상수
+DOWNLOADS_DIR = PROJECT_ROOT / "downloads"
 INPUT_SUBS_DIR = PROJECT_ROOT / "input_subs"
 TRANSLATED_SUBS_DIR = PROJECT_ROOT / "translated_subs"
+FINAL_VIDEOS_DIR = PROJECT_ROOT / "final_videos"
+
 
 class WorkerThread(QThread):
-    """단계별 작업을 실행하는 워커 스레드"""
     progress_signal = pyqtSignal(str)
     status_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(bool, str)
 
-    def __init__(self, steps, video_id="", hard_sub=False):
+    def __init__(self, steps, video_id, is_hard_sub=False):
         super().__init__()
-        self.steps = steps  # [(step_name, script_name, args), ...]
+        self.steps = steps
         self.video_id = video_id
-        self.hard_sub = hard_sub
-        self.process = None
-        self.is_cancelled = False
-
-    def get_python_cmd(self):
-        return sys.executable
-
-    def stop(self):
-        self.is_cancelled = True
-        if self.process:
-            try:
-                # 프로세스 그룹 전체 종료 (Codex 지적)
-                import signal
-                os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-            except Exception:
-                try:
-                    self.process.kill()
-                except Exception:
-                    pass
-
-    def run_step(self, step_name, script_name, args):
-        if self.is_cancelled:
-            return False
-
-        self.status_signal.emit(f"현재 단계: {step_name}")
-        self.progress_signal.emit(f"\n===== [ {step_name} 시작 ] =====")
-        
-        cmd = [self.get_python_cmd(), str(SCRIPTS_DIR / script_name)] + args
-        self.progress_signal.emit(f"명령어: {' '.join(cmd)}")
-
-        try:
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                universal_newlines=True,
-                start_new_session=True
-            )
-
-            for line in self.process.stdout:
-                if self.is_cancelled:
-                    break
-                self.progress_signal.emit(line.strip())
-
-            self.process.wait()
-
-            if self.is_cancelled:
-                self.progress_signal.emit("🚫 작업이 취소되었습니다.")
-                return False
-
-            if self.process.returncode != 0:
-                self.progress_signal.emit(f"❌ {step_name} 실패 (코드: {self.process.returncode})")
-                return False
-            
-            self.progress_signal.emit(f"✅ {step_name} 완료")
-            return True
-
-        except Exception as e:
-            self.progress_signal.emit(f"❌ 예외 발생: {str(e)}")
-            return False
-        finally:
-            self.process = None
+        self.is_hard_sub = is_hard_sub
+        self._is_running = True
 
     def run(self):
+        import subprocess
+
         for step_name, script_name, args in self.steps:
-            if not self.run_step(step_name, script_name, args):
-                # 취소/실패 구분 (Codex 지적)
-                if self.is_cancelled:
-                    self.finished_signal.emit(False, "작업이 취소되었습니다.")
-                else:
-                    self.finished_signal.emit(False, f"{step_name} 단계 실패")
+            if not self._is_running:
+                break
+            
+            self.progress_signal.emit(f"\n--- {step_name} 진행 중 ---")
+            self.status_signal.emit(f"{step_name}...")
+
+            script_path = PROJECT_ROOT / "scripts" / script_name
+            cmd = [sys.executable, str(script_path)] + args
+
+            try:
+                process = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
+                )
+                
+                for line in process.stdout:
+                    if not self._is_running:
+                        process.terminate()
+                        break
+                    self.progress_signal.emit(line.strip())
+                
+                return_code = process.wait()
+                if return_code != 0 and self._is_running:
+                    self.finished_signal.emit(False, f"{step_name} 실패 (Code: {return_code})")
+                    return
+
+            except Exception as e:
+                self.finished_signal.emit(False, f"에러 발생: {str(e)}")
                 return
-        
-        self.finished_signal.emit(True, "작업 완료!")
+
+        if self._is_running:
+            self.finished_signal.emit(True, "모든 작업 완료")
+
+    def stop(self):
+        self._is_running = False
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("YouTube 번역기 (반자동 모드)")
-        self.setGeometry(100, 100, 700, 800)
-        
-        self.video_id = ""
+        self.setWindowTitle("YouTube Subtitle Translator (Clean Arch)")
+        self.setGeometry(100, 100, 700, 600)
+        self.video_id = None
         self.worker = None
         self.init_ui()
 
@@ -122,38 +89,24 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
 
-        # 1. 헤더
-        header = QLabel("YouTube 자동 번역기")
-        header.setStyleSheet("font-size: 24px; font-weight: bold; color: #333; margin-bottom: 10px;")
-        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(header)
-
-        # 2. 입력 폼
-        form_layout = QVBoxLayout()
-        form_layout.setSpacing(10)
-
-        # URL
-        url_layout = QVBoxLayout()
-        url_label = QLabel("YouTube URL")
-        url_label.setStyleSheet("font-weight: bold;")
+        # 1. URL 입력
+        url_layout = QHBoxLayout()
+        url_label = QLabel("YouTube URL:")
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("https://www.youtube.com/watch?v=...")
+        self.url_input.setPlaceholderText("https://youtu.be/...")
         url_layout.addWidget(url_label)
         url_layout.addWidget(self.url_input)
-        form_layout.addLayout(url_layout)
+        layout.addLayout(url_layout)
 
-        # Option
-        self.hard_sub_check = QCheckBox("자막을 영상에 굽기 (하드섭)")
-        self.hard_sub_check.setChecked(False)
-        form_layout.addWidget(self.hard_sub_check)
+        # 2. 옵션 (하드섭)
+        self.hard_sub_check = QCheckBox("자막 영상에 굽기 (Hard Sub)")
+        layout.addWidget(self.hard_sub_check)
 
-        layout.addLayout(form_layout)
-
-        # 3. 버튼 영역 (3개 버튼)
+        # 3. 버튼 영역
         btn_layout = QHBoxLayout()
         
-        # 시작 버튼
-        self.btn_start = QPushButton("🚀 시작 (다운로드+자막추출)")
+        # 시작 버튼 (1단계)
+        self.btn_start = QPushButton("🚀 시작 (다운로드+추출)")
         self.btn_start.setMinimumHeight(50)
         self.btn_start.setStyleSheet("""
             QPushButton {
@@ -164,11 +117,10 @@ class MainWindow(QMainWindow):
                 border-radius: 5px;
             }
             QPushButton:hover { background-color: #0056b3; }
-            QPushButton:disabled { background-color: #cccccc; }
         """)
         self.btn_start.clicked.connect(self.start_phase1)
 
-        # 번역완료 버튼
+        # 번역 완료 확인 버튼 (2단계)
         self.btn_translate_done = QPushButton("✅ 번역완료 (영상생성)")
         self.btn_translate_done.setMinimumHeight(50)
         self.btn_translate_done.setStyleSheet("""
@@ -251,10 +203,10 @@ class MainWindow(QMainWindow):
 
         steps = [
             ("1. 영상 다운로드", "download.py", [url]),
-            ("2. 자막 추출/STT", "extract_subs.py", [self.video_id]),
+            # FIXED: 명시적으로 --video_id 전달
+            ("2. 자막 추출/STT", "extract_subs.py", ["--video_id", self.video_id]),
         ]
 
-        # 새 작업 시작 시 번역완료 버튼 비활성화 (Codex 지적: 상태 충돌 방지)
         self.btn_translate_done.setEnabled(False)
         self.set_running_state(True, phase=1)
         self.worker = WorkerThread(steps, self.video_id)
@@ -268,7 +220,6 @@ class MainWindow(QMainWindow):
         self.worker = None
 
         if success:
-            # 번역 안내 메시지 출력
             input_srt = INPUT_SUBS_DIR / f"{self.video_id}.srt"
             translated_srt = TRANSLATED_SUBS_DIR / f"{self.video_id}.srt"
             
@@ -301,7 +252,6 @@ SRT 형식을 유지하고, 타임코드는 절대 수정하지 마세요."
             QMessageBox.warning(self, "경고", "먼저 시작 버튼으로 자막을 추출해주세요.")
             return
 
-        # 번역된 자막 파일 존재 확인
         translated_srt = TRANSLATED_SUBS_DIR / f"{self.video_id}.srt"
         if not translated_srt.exists():
             QMessageBox.warning(self, "경고", 
@@ -311,7 +261,7 @@ SRT 형식을 유지하고, 타임코드는 절대 수정하지 마세요."
 
         self.log(f"\n🎬 2단계 시작: 영상 생성")
 
-        embed_args = [self.video_id]
+        embed_args = ["--video_id", self.video_id]
         if self.hard_sub_check.isChecked():
             embed_args.append("--hard")
 
