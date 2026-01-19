@@ -8,13 +8,18 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QTextEdit, QMessageBox, QCheckBox
+    QLabel, QLineEdit, QPushButton, QTextEdit, QMessageBox, QCheckBox, QRadioButton, QButtonGroup
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 # 프로젝트 루트 경로 추가 (모듈 import 위해)
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+# ArgosTranslatorAdapter import
+from src.infrastructure.translators.argos_translator import ArgosTranslatorAdapter
+from src.domain.entities.subtitle import Subtitle
+from src.domain.value_objects.video_id import VideoId
 
 # 경로 상수
 DOWNLOADS_DIR = PROJECT_ROOT / "downloads"
@@ -23,16 +28,83 @@ TRANSLATED_SUBS_DIR = PROJECT_ROOT / "translated_subs"
 FINAL_VIDEOS_DIR = PROJECT_ROOT / "final_videos"
 
 
+class TranslationWorkerThread(QThread):
+    """Argos 번역 전용 워커 스레드"""
+    progress_signal = pyqtSignal(str, float)  # message, percentage
+    finished_signal = pyqtSignal(bool, str)
+
+    def __init__(self, video_id):
+        super().__init__()
+        self.video_id = video_id
+        self._is_running = True
+        self.translator = None
+
+    def run(self):
+        try:
+            input_srt = INPUT_SUBS_DIR / f"{self.video_id}.srt"
+            output_srt = TRANSLATED_SUBS_DIR / f"{self.video_id}.srt"
+
+            if not input_srt.exists():
+                self.finished_signal.emit(False, f"원본 자막 파일을 찾을 수 없습니다: {input_srt}")
+                return
+
+            # Lazy initialization: 번역 시작 시점에만 Argos 초기화
+            self.progress_signal.emit("Argos 번역 엔진 초기화 중...", 0.0)
+            self.translator = ArgosTranslatorAdapter()
+
+            self.progress_signal.emit("자막 파일 로딩 중...", 5.0)
+
+            # Subtitle 객체 생성
+            subtitle = Subtitle(
+                video_id=VideoId(self.video_id),
+                file_path=input_srt,
+                language="en",  # 원본 언어 (영어 가정)
+                format="srt",
+            )
+
+            # 번역 실행
+            def progress_callback(message: str, percent: float):
+                if self._is_running:
+                    self.progress_signal.emit(message, percent)
+
+            translated_subtitle = self.translator.translate(
+                subtitle=subtitle,
+                target_language="ko",
+                progress_callback=progress_callback
+            )
+
+            if not self._is_running:
+                self.finished_signal.emit(False, "번역이 취소되었습니다.")
+                return
+
+            # 번역된 자막 저장
+            self.progress_signal.emit("번역된 자막 저장 중...", 95.0)
+            output_srt.parent.mkdir(parents=True, exist_ok=True)
+            output_srt.write_text(translated_subtitle.text, encoding="utf-8")
+
+            self.progress_signal.emit("번역 완료!", 100.0)
+            self.finished_signal.emit(True, f"번역 완료: {output_srt}")
+
+        except Exception as e:
+            import traceback
+            error_msg = f"번역 중 오류 발생:\n{str(e)}\n\n{traceback.format_exc()}"
+            self.finished_signal.emit(False, error_msg)
+
+    def stop(self):
+        self._is_running = False
+
+
 class WorkerThread(QThread):
     progress_signal = pyqtSignal(str)
     status_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(bool, str)
 
-    def __init__(self, steps, video_id, is_hard_sub=False):
+    def __init__(self, steps, video_id, is_hard_sub=False, translator_mode="argos"):
         super().__init__()
         self.steps = steps
         self.video_id = video_id
         self.is_hard_sub = is_hard_sub
+        self.translator_mode = translator_mode
         self._is_running = True
 
     def run(self):
@@ -41,7 +113,7 @@ class WorkerThread(QThread):
         for step_name, script_name, args in self.steps:
             if not self._is_running:
                 break
-            
+
             self.progress_signal.emit(f"\n--- {step_name} 진행 중 ---")
             self.status_signal.emit(f"{step_name}...")
 
@@ -52,13 +124,13 @@ class WorkerThread(QThread):
                 process = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
                 )
-                
+
                 for line in process.stdout:
                     if not self._is_running:
                         process.terminate()
                         break
                     self.progress_signal.emit(line.strip())
-                
+
                 return_code = process.wait()
                 if return_code != 0 and self._is_running:
                     self.finished_signal.emit(False, f"{step_name} 실패 (Code: {return_code})")
@@ -98,13 +170,32 @@ class MainWindow(QMainWindow):
         url_layout.addWidget(self.url_input)
         layout.addLayout(url_layout)
 
-        # 2. 옵션 (하드섭)
+        # 2. 번역 엔진 선택
+        translator_layout = QHBoxLayout()
+        translator_label = QLabel("번역 엔진:")
+
+        self.translator_group = QButtonGroup()
+        self.radio_argos = QRadioButton("Argos (로컬, 무료)")
+        self.radio_gemini = QRadioButton("Gemini (API, 수동)")
+
+        self.radio_argos.setChecked(True)  # 기본값: Argos
+
+        self.translator_group.addButton(self.radio_argos)
+        self.translator_group.addButton(self.radio_gemini)
+
+        translator_layout.addWidget(translator_label)
+        translator_layout.addWidget(self.radio_argos)
+        translator_layout.addWidget(self.radio_gemini)
+        translator_layout.addStretch()
+        layout.addLayout(translator_layout)
+
+        # 3. 옵션 (하드섭)
         self.hard_sub_check = QCheckBox("자막 영상에 굽기 (Hard Sub)")
         layout.addWidget(self.hard_sub_check)
 
-        # 3. 버튼 영역
+        # 4. 버튼 영역
         btn_layout = QHBoxLayout()
-        
+
         # 시작 버튼 (1단계)
         self.btn_start = QPushButton("🚀 시작 (다운로드+추출)")
         self.btn_start.setMinimumHeight(50)
@@ -120,8 +211,25 @@ class MainWindow(QMainWindow):
         """)
         self.btn_start.clicked.connect(self.start_phase1)
 
+        # 번역 시작 버튼 (1.5단계 - Argos 전용)
+        self.btn_translate = QPushButton("🌐 번역하기 (Argos)")
+        self.btn_translate.setMinimumHeight(50)
+        self.btn_translate.setStyleSheet("""
+            QPushButton {
+                background-color: #17a2b8;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #117a8b; }
+            QPushButton:disabled { background-color: #cccccc; }
+        """)
+        self.btn_translate.setEnabled(False)
+        self.btn_translate.clicked.connect(self.start_translation)
+
         # 번역 완료 확인 버튼 (2단계)
-        self.btn_translate_done = QPushButton("✅ 번역완료 (영상생성)")
+        self.btn_translate_done = QPushButton("✅ 영상생성")
         self.btn_translate_done.setMinimumHeight(50)
         self.btn_translate_done.setStyleSheet("""
             QPushButton {
@@ -147,6 +255,7 @@ class MainWindow(QMainWindow):
         self.btn_cancel.clicked.connect(self.cancel_work)
 
         btn_layout.addWidget(self.btn_start)
+        btn_layout.addWidget(self.btn_translate)
         btn_layout.addWidget(self.btn_translate_done)
         btn_layout.addWidget(self.btn_cancel)
         layout.addLayout(btn_layout)
@@ -215,6 +324,57 @@ class MainWindow(QMainWindow):
         self.worker.finished_signal.connect(self.on_phase1_finished)
         self.worker.start()
 
+    def start_translation(self):
+        """번역 시작 (Argos 전용)"""
+        if not self.video_id:
+            QMessageBox.warning(self, "경고", "먼저 시작 버튼으로 자막을 추출해주세요.")
+            return
+
+        input_srt = INPUT_SUBS_DIR / f"{self.video_id}.srt"
+        if not input_srt.exists():
+            QMessageBox.warning(self, "경고",
+                f"원본 자막 파일을 찾을 수 없습니다.\n\n{input_srt}")
+            return
+
+        self.log(f"\n🌐 Argos 번역 시작")
+        self.log(f"원본 파일: {input_srt}")
+
+        # TranslationWorkerThread 사용
+        self.btn_translate.setEnabled(False)
+        self.btn_cancel.setEnabled(True)
+        self.btn_start.setEnabled(False)
+        self.update_status("Argos 번역 중...")
+
+        self.worker = TranslationWorkerThread(self.video_id)
+        self.worker.progress_signal.connect(self.on_translation_progress)
+        self.worker.finished_signal.connect(self.on_translation_finished)
+        self.worker.start()
+
+    def on_translation_progress(self, message, percent):
+        """번역 진행 상황 업데이트"""
+        self.log(f"[{percent:.1f}%] {message}")
+        self.update_status(f"{message} ({percent:.1f}%)")
+
+    def on_translation_finished(self, success, message):
+        """번역 완료 콜백"""
+        self.worker = None
+        self.btn_cancel.setEnabled(False)
+        self.btn_start.setEnabled(True)
+        self.btn_translate.setEnabled(True)
+
+        if success:
+            translated_srt = TRANSLATED_SUBS_DIR / f"{self.video_id}.srt"
+            self.log(f"\n✅ 번역 완료!")
+            self.log(f"번역된 자막: {translated_srt}")
+            self.log("\n다음 단계: [영상생성] 버튼을 클릭하세요!")
+            self.update_status("번역 완료 - 영상생성 대기 중...")
+            self.btn_translate_done.setEnabled(True)
+            QMessageBox.information(self, "완료", f"번역 완료!\n\n{translated_srt}")
+        else:
+            self.log(f"\n❌ 번역 실패: {message}")
+            self.update_status("번역 실패 ❌")
+            QMessageBox.critical(self, "번역 실패", message)
+
     def on_phase1_finished(self, success, message):
         self.set_running_state(False, phase=1)
         self.worker = None
@@ -222,8 +382,27 @@ class MainWindow(QMainWindow):
         if success:
             input_srt = INPUT_SUBS_DIR / f"{self.video_id}.srt"
             translated_srt = TRANSLATED_SUBS_DIR / f"{self.video_id}.srt"
-            
-            guide_msg = f"""
+
+            # Argos 모드인 경우 자동 번역 버튼 활성화
+            if self.radio_argos.isChecked():
+                guide_msg = f"""
+═══════════════════════════════════════════════════════════════
+📋 자막 추출 완료!
+
+📁 원본 자막 파일: {input_srt}
+
+🌐 Argos 로컬 번역 엔진 선택됨
+─────────────────────────────────────────────────────────────
+✅ [번역하기 (Argos)] 버튼을 클릭하여 자동 번역을 시작하세요!
+   (API 키 불필요, 로컬에서 즉시 실행)
+═══════════════════════════════════════════════════════════════
+"""
+                self.log(guide_msg)
+                self.update_status("자막 추출 완료 - Argos 번역 대기 중...")
+                self.btn_translate.setEnabled(True)
+            else:
+                # Gemini 모드인 경우 수동 번역 안내
+                guide_msg = f"""
 ═══════════════════════════════════════════════════════════════
 📋 자막 추출 완료! 이제 번역을 진행해주세요.
 
@@ -231,17 +410,17 @@ class MainWindow(QMainWindow):
 
 📝 Antigravity에게 다음과 같이 요청하세요:
 ─────────────────────────────────────────────────────────────
-"{input_srt} 파일을 한국어로 번역해서 
+"{input_srt} 파일을 한국어로 번역해서
 {translated_srt} 파일로 저장해주세요.
 SRT 형식을 유지하고, 타임코드는 절대 수정하지 마세요."
 ─────────────────────────────────────────────────────────────
 
-✅ 번역이 완료되면 [번역완료] 버튼을 클릭하세요!
+✅ 번역이 완료되면 [영상생성] 버튼을 클릭하세요!
 ═══════════════════════════════════════════════════════════════
 """
-            self.log(guide_msg)
-            self.update_status("자막 추출 완료 - 번역 대기 중...")
-            self.btn_translate_done.setEnabled(True)
+                self.log(guide_msg)
+                self.update_status("자막 추출 완료 - 번역 대기 중...")
+                self.btn_translate_done.setEnabled(True)
         else:
             QMessageBox.critical(self, "실패", message)
             self.update_status("작업 실패 ❌")

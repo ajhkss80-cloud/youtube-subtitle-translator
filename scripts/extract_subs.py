@@ -82,7 +82,7 @@ def _resolve_video_from_path(path: Path) -> Tuple[Video, Path]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="자막 추출 (Whisper)")
     parser.add_argument("--video_id", help="영상 ID (downloads 폴더 내 검색)")
-    parser.add_argument("--language", default="ko", help="자막 언어 (기본: ko)")
+    parser.add_argument("--language", default=None, help="자막 언어 (기본: auto-detect)")
     parser.add_argument("--model", default="base", help="Whisper 모델 크기")
     parser.add_argument("paths", nargs="*", help="영상 파일/폴더 경로 또는 VideoID")
     args = parser.parse_args()

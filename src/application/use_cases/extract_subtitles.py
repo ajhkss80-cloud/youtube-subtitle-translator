@@ -19,7 +19,7 @@ class ExtractSubtitlesUseCase:
         self,
         video: Video,
         output_path: Path,
-        language: str = "ko",
+        language: Optional[str] = None,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> Subtitle:
         """영상에서 자막 추출"""

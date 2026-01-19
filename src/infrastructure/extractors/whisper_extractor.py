@@ -26,7 +26,7 @@ class WhisperExtractor(SubtitleExtractorPort):
         self,
         video: Video,
         output_path: Path,
-        language: str = "ko",
+        language: Optional[str] = None,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> Subtitle:
         if video.file_path is None:
@@ -80,16 +80,20 @@ class WhisperExtractor(SubtitleExtractorPort):
             return match.group(1)
         return None
 
-    def _find_subtitle_file(self, video_dir: Path, preferred_language: str) -> Optional[Path]:
+    def _find_subtitle_file(self, video_dir: Path, preferred_language: Optional[str]) -> Optional[Path]:
         srt_files = list(video_dir.glob("*.srt"))
         vtt_files = list(video_dir.glob("*.vtt"))
         all_subs = srt_files + vtt_files
         if not all_subs:
             return None
 
-        priority_langs = [preferred_language] + [
-            lang for lang in self._LANG_PRIORITY if lang != preferred_language
-        ]
+        # If no preferred language, use default priority order
+        if preferred_language:
+            priority_langs = [preferred_language] + [
+                lang for lang in self._LANG_PRIORITY if lang != preferred_language
+            ]
+        else:
+            priority_langs = list(self._LANG_PRIORITY)
 
         def get_priority(sub_path: Path) -> tuple:
             filename = sub_path.name.lower()
@@ -126,7 +130,7 @@ class WhisperExtractor(SubtitleExtractorPort):
         self,
         video_path: Path,
         output_srt: Path,
-        language: str,
+        language: Optional[str],
         progress_callback: Optional[ProgressCallback],
     ) -> None:
         try:

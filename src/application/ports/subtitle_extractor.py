@@ -18,13 +18,13 @@ class SubtitleExtractorPort(ABC):
     
     @abstractmethod
     def extract(
-        self, 
-        video: Video, 
-        output_path: Path, 
-        language: str = "ko",
+        self,
+        video: Video,
+        output_path: Path,
+        language: Optional[str] = None,
         progress_callback: Optional[ProgressCallback] = None
     ) -> Subtitle:
-        """영상에서 자막 추출 또는 STT 생성 후 Subtitle 반환"""
+        """영상에서 자막 추출 또는 STT 생성 후 Subtitle 반환 (language=None: auto-detect)"""
         pass
 
     @abstractmethod
