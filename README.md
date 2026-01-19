@@ -1,9 +1,11 @@
 # YouTube Subtitle Translator
 
 > YouTube 영상을 자동으로 다운로드하고, 자막을 추출/번역하여 최종 영상을 생성하는 도구
+> **✨ Built-in Offline Translation (Argos Translate) 지원**
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
 ![PyQt6](https://img.shields.io/badge/GUI-PyQt6-green.svg)
+![Argos](https://img.shields.io/badge/Translation-Argos_Translate-orange.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 ---
@@ -92,7 +94,7 @@ source venv/bin/activate
 venv\Scripts\activate.bat
 
 # 의존성 설치
-pip install yt-dlp openai-whisper PyQt6
+pip install yt-dlp openai-whisper PyQt6 argostranslate
 ```
 
 ### 4. 실행
@@ -109,32 +111,39 @@ python scripts/gui_app.py
 
 ## 📖 사용 방법 (GUI)
 
-### Step 1: 시작
+### Step 1: 시작 및 번역 엔진 선택
 1. GUI 실행 후 **YouTube URL** 입력
-2. **시작 버튼** 클릭
-3. 영상 다운로드 + 자막 추출 자동 진행
+2. **번역 엔진 선택**:
+   - **🔘 Argos (로컬, 무료)**: 완전 오프라인, API 키 불필요, 기술 문서/일반 콘텐츠 적합
+   - **🔘 Gemini (API, 수동)**: AI 도구 활용, 문맥 이해가 중요한 콘텐츠 적합
+3. **시작 버튼** 클릭
+4. 영상 다운로드 + 자막 추출 자동 진행
 
-### Step 2: 번역 (수동)
+### Step 2-A: 자동 번역 (Argos 선택 시)
+1. 자막 추출 완료 후 **🌐 번역하기 (Argos)** 버튼 클릭
+2. Argos 번역 엔진이 자동으로 번역 수행
+3. 번역 완료 후 자동으로 다음 단계로 진행
+
+### Step 2-B: 수동 번역 (Gemini 선택 시)
 추출 완료 후 화면에 안내 메시지가 표시됩니다:
 
 ```
 📁 원본 자막 파일: input_subs/VIDEO_ID.srt
 
 📝 AI 도구에게 다음과 같이 요청하세요:
-"input_subs/VIDEO_ID.srt 파일을 한국어로 번역해서 
+"input_subs/VIDEO_ID.srt 파일을 한국어로 번역해서
 translated_subs/VIDEO_ID.srt 파일로 저장해주세요.
 SRT 형식을 유지하고, 타임코드는 절대 수정하지 마세요."
 ```
 
 **사용 가능한 AI 도구:**
-- Antigravity (현재 사용 중)
 - ChatGPT
 - Claude
 - Gemini Web
 - 기타 AI 어시스턴트
 
 ### Step 3: 완료
-1. 번역이 완료되면 **번역완료 버튼** 클릭
+1. (Gemini 모드) 번역이 완료되면 **번역완료 버튼** 클릭
 2. 최종 영상 자동 생성
 3. 결과: `final_videos/VIDEO_ID_translated.mp4`
 
@@ -164,22 +173,42 @@ python scripts/embed_subs.py VIDEO_ID --hard # 하드섭 (영상에 굽기)
 
 ```
 youtube-subtitle-translator/
+├── src/                           # Clean Architecture (v2.0)
+│   ├── domain/                    # 도메인 계층 (비즈니스 로직)
+│   │   ├── entities/              # 엔티티 (Video, Subtitle)
+│   │   └── value_objects/         # 값 객체 (VideoID 등)
+│   ├── application/               # 애플리케이션 계층
+│   │   ├── use_cases/             # 유스케이스 (다운로드, 추출, 번역, 삽입)
+│   │   └── ports/                 # 인터페이스 정의 (Ports)
+│   ├── infrastructure/            # 인프라 계층 (Adapters)
+│   │   ├── downloaders/           # YtDlpDownloader
+│   │   ├── extractors/            # WhisperExtractor
+│   │   ├── translators/           # ArgosTranslatorAdapter
+│   │   └── embedders/             # FFmpegEmbedder
+│   └── presentation/              # 프레젠테이션 계층
+│       └── gui/                   # PyQt6 GUI
 ├── scripts/
-│   ├── download.py      # 영상 다운로드 (yt-dlp)
-│   ├── extract_subs.py  # 자막 추출/STT (Whisper)
-│   ├── translate.py     # [미사용] 자막 번역 (Gemini API)
-│   ├── embed_subs.py    # 자막 삽입 (ffmpeg)
-│   └── gui_app.py       # PyQt6 GUI 애플리케이션
-├── downloads/           # 다운로드된 원본 영상
-├── input_subs/          # 추출된 원본 자막 (.srt)
-├── translated_subs/     # 번역된 자막 (.srt)
-├── final_videos/        # 최종 출력 영상 (.mp4)
-├── rules.md             # 번역 가이드라인
-├── CHANGELOG.md         # 변경 이력
-└── run_gui.sh           # GUI 실행 스크립트 (Linux/Mac)
+│   ├── download.py                # CLI: 영상 다운로드 (yt-dlp)
+│   ├── extract_subs.py            # CLI: 자막 추출/STT (Whisper)
+│   ├── translate_argos.py         # CLI: Argos 번역
+│   ├── translate.py               # [미사용] 자막 번역 (Gemini API)
+│   ├── embed_subs.py              # CLI: 자막 삽입 (ffmpeg)
+│   └── gui_app.py                 # PyQt6 GUI 애플리케이션
+├── tests/                         # 단위 테스트 및 통합 테스트
+├── downloads/                     # 다운로드된 원본 영상
+├── input_subs/                    # 추출된 원본 자막 (.srt)
+├── translated_subs/               # 번역된 자막 (.srt)
+├── final_videos/                  # 최종 출력 영상 (.mp4)
+├── rules.md                       # 번역 가이드라인
+├── CHANGELOG.md                   # 변경 이력
+└── run_gui.sh                     # GUI 실행 스크립트 (Linux/Mac)
 ```
 
-> **참고**: `translate.py`는 Gemini API 토큰 제한 문제로 현재 사용하지 않습니다. (CHANGELOG 11차 참조)
+> **아키텍처**: v2.0부터 **Clean Architecture (Port/Adapter 패턴)** 적용
+> - **Domain**: 비즈니스 로직과 엔티티 (의존성 없음)
+> - **Application**: 유스케이스와 포트 인터페이스
+> - **Infrastructure**: 외부 도구 어댑터 (YtDlp, Whisper, Argos, FFmpeg)
+> - **Presentation**: GUI 레이어
 
 ---
 
