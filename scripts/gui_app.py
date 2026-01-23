@@ -4,11 +4,12 @@ GUI Application for YouTube Subtitle Translator
 """
 import sys
 import re
+import shutil
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QTextEdit, QMessageBox, QCheckBox, QRadioButton, QButtonGroup
+    QLabel, QLineEdit, QPushButton, QTextEdit, QMessageBox, QCheckBox, QRadioButton, QButtonGroup, QComboBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
@@ -82,6 +83,18 @@ class TranslationWorkerThread(QThread):
             output_srt.parent.mkdir(parents=True, exist_ok=True)
             output_srt.write_text(translated_subtitle.text, encoding="utf-8")
 
+            # [Added] 소프트섭 편의를 위해 원본 영상 폴더로 자막 자동 복사 (VLC/플레이어 호환용)
+            try:
+                video_dir = DOWNLOADS_DIR / str(self.video_id)
+                if video_dir.exists():
+                    # 플레이어 자동 인식을 위해 'video.srt' 및 'video.ko.srt'로 복사
+                    shutil.copy2(output_srt, video_dir / "video.srt")
+                    shutil.copy2(output_srt, video_dir / "video.ko.srt")
+                    self.progress_signal.emit(f"💡 소프트섭 자막이 영상 폴더에 복사되었습니다.", 97.0)
+            except Exception as e:
+                # 자막 복사 실패는 비치명적 오류이므로 로그만 출력
+                self.progress_signal.emit(f"⚠️ 소프트섭 복사 중 오류 (무시됨): {e}", 97.0)
+
             self.progress_signal.emit("번역 완료!", 100.0)
             self.finished_signal.emit(True, f"번역 완료: {output_srt}")
 
@@ -106,6 +119,7 @@ class WorkerThread(QThread):
         self.is_hard_sub = is_hard_sub
         self.translator_mode = translator_mode
         self._is_running = True
+        self.process_output = []  # 실행 결과 저장용
 
     def run(self):
         import subprocess
@@ -129,11 +143,26 @@ class WorkerThread(QThread):
                     if not self._is_running:
                         process.terminate()
                         break
-                    self.progress_signal.emit(line.strip())
+                    output_line = line.strip()
+                    self.process_output.append(output_line)
+                    self.progress_signal.emit(output_line)
 
                 return_code = process.wait()
                 if return_code != 0 and self._is_running:
-                    self.finished_signal.emit(False, f"{step_name} 실패 (Code: {return_code})")
+                    # 에러 분석: 메모리 부족 여부 확인
+                    output_text = "\n".join(self.process_output[-50:]).lower()
+                    oom_patterns = [
+                        'outofmemory', 'out of memory', 'cuda out of memory',
+                        'cuda error', 'cudnn error', 'vram', 'allocation failed',
+                        'memory allocation', 'torch.cuda.outofmemoryerror'
+                    ]
+                    is_oom = any(pattern in output_text for pattern in oom_patterns)
+                    
+                    error_msg = f"{step_name} 실패 (Code: {return_code})"
+                    if is_oom:
+                        error_msg += " [메모리 부족]"
+                    
+                    self.finished_signal.emit(False, error_msg)
                     return
 
             except Exception as e:
@@ -189,11 +218,27 @@ class MainWindow(QMainWindow):
         translator_layout.addStretch()
         layout.addLayout(translator_layout)
 
-        # 3. 옵션 (하드섭)
+        # 3. Whisper 모델 선택
+        whisper_layout = QHBoxLayout()
+        whisper_label = QLabel("Whisper AI 모델:")
+        self.whisper_combo = QComboBox()
+        self.whisper_combo.addItems(["base", "small", "medium", "large"])
+        self.whisper_combo.setToolTip(
+            "base: 매우 빠름, 정확도 낮음 (VRAM 1GB)\n"
+            "small: 빠름, 정확도 보통 (VRAM 2GB)\n"
+            "medium: 느림, 정확도 높음 (VRAM 5GB)\n"
+            "large: 매우 느림, 최고 품질 (VRAM 10GB)"
+        )
+        whisper_layout.addWidget(whisper_label)
+        whisper_layout.addWidget(self.whisper_combo)
+        whisper_layout.addStretch()
+        layout.addLayout(whisper_layout)
+
+        # 4. 옵션 (하드섭)
         self.hard_sub_check = QCheckBox("자막 영상에 굽기 (Hard Sub)")
         layout.addWidget(self.hard_sub_check)
 
-        # 4. 버튼 영역
+        # 5. 버튼 영역
         btn_layout = QHBoxLayout()
 
         # 시작 버튼 (1단계)
@@ -312,8 +357,11 @@ class MainWindow(QMainWindow):
 
         steps = [
             ("1. 영상 다운로드", "download.py", [url]),
-            # FIXED: 명시적으로 --video_id 전달
-            ("2. 자막 추출/STT", "extract_subs.py", ["--video_id", self.video_id]),
+            # FIXED: 명시적으로 --video_id 및 --model 전달
+            ("2. 자막 추출/STT", "extract_subs.py", [
+                "--video_id", self.video_id,
+                "--model", self.whisper_combo.currentText()
+            ]),
         ]
 
         self.btn_translate_done.setEnabled(False)
@@ -422,7 +470,14 @@ SRT 형식을 유지하고, 타임코드는 절대 수정하지 마세요."
                 self.update_status("자막 추출 완료 - 번역 대기 중...")
                 self.btn_translate_done.setEnabled(True)
         else:
-            QMessageBox.critical(self, "실패", message)
+            if "[메모리 부족]" in message:
+                QMessageBox.warning(
+                    self, "메모리 부족",
+                    "컴퓨터의 메모리(VRAM)가 부족하여 작업을 중단했습니다.\n\n"
+                    "더 낮은 품질의 모델(예: base, small)을 선택한 후 다시 시도해 주세요."
+                )
+            else:
+                QMessageBox.critical(self, "실패", message)
             self.update_status("작업 실패 ❌")
 
     def start_phase2(self):
